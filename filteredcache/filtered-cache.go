@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-package cache
+package filteredcache
 
 import (
 	"context"
@@ -34,10 +34,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
+	toolscache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
-	cr_cache "sigs.k8s.io/controller-runtime/pkg/cache"
-	cr_client "sigs.k8s.io/controller-runtime/pkg/client"
+	cache "sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
@@ -48,8 +48,8 @@ var ErrUnsupported = errors.New("unsupported operation")
 var ErrInternalError = errors.New("internal error")
 
 // NewFilteredCacheBuilder create a customized cache
-func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string) cr_cache.NewCacheFunc {
-	return func(config *rest.Config, opts cr_cache.Options) (cr_cache.Cache, error) {
+func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string) cache.NewCacheFunc {
+	return func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
 		// Setup filtered informer that will only store/return items matching the filter for listing purposes
 		clientSet, err := kubernetes.NewForConfig(config)
 		if err != nil {
@@ -63,7 +63,7 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string) cr_
 
 		informerMap := buildInformerMap(clientSet, opts, gvkLabelMap, resync)
 
-		fallback, err := cr_cache.New(config, opts)
+		fallback, err := cache.New(config, opts)
 		if err != nil {
 			klog.Error(err, "Failed to init fallback cache")
 			return nil, err
@@ -72,18 +72,19 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string) cr_
 	}
 }
 
-func buildInformerMap(clientSet *kubernetes.Clientset, opts cr_cache.Options, gvkLabelMap map[schema.GroupVersionKind]string, resync time.Duration) map[schema.GroupVersionKind]cache.SharedIndexInformer {
-	informerMap := make(map[schema.GroupVersionKind]cache.SharedIndexInformer)
+func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLabelMap map[schema.GroupVersionKind]string, resync time.Duration) map[schema.GroupVersionKind]toolscache.SharedIndexInformer {
+	informerMap := make(map[schema.GroupVersionKind]toolscache.SharedIndexInformer)
 	for gvk, label := range gvkLabelMap {
 		plural := strings.ToLower(flect.Pluralize(gvk.Kind))
-		listerWatcher := cache.NewFilteredListWatchFromClient(clientSet.CoreV1().RESTClient(), plural, opts.Namespace, func(options *metav1.ListOptions) {
+		listerWatcher := toolscache.NewFilteredListWatchFromClient(clientSet.CoreV1().RESTClient(), plural, opts.Namespace, func(options *metav1.ListOptions) {
+			// TODO: add field selector
 			options.LabelSelector = label
 		})
 
 		objType := &unstructured.Unstructured{}
 		objType.GetObjectKind().SetGroupVersionKind(gvk)
 
-		informer := cache.NewSharedIndexInformer(listerWatcher, objType, resync, cache.Indexers{})
+		informer := toolscache.NewSharedIndexInformer(listerWatcher, objType, resync, toolscache.Indexers{})
 
 		informerMap[gvk] = informer
 		gvkList := schema.GroupVersionKind{Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind + "List"}
@@ -94,12 +95,12 @@ func buildInformerMap(clientSet *kubernetes.Clientset, opts cr_cache.Options, gv
 
 type filteredCache struct {
 	clientSet   *kubernetes.Clientset
-	informerMap map[schema.GroupVersionKind]cache.SharedIndexInformer
-	fallback    cr_cache.Cache
+	informerMap map[schema.GroupVersionKind]toolscache.SharedIndexInformer
+	fallback    cache.Cache
 	Scheme      *runtime.Scheme
 }
 
-func (cc filteredCache) Get(ctx context.Context, key cr_client.ObjectKey, obj runtime.Object) error {
+func (cc filteredCache) Get(ctx context.Context, key client.ObjectKey, obj runtime.Object) error {
 	gvk, err := apiutil.GVKForObject(obj, cc.Scheme)
 	if err != nil {
 		klog.Error(err)
@@ -118,7 +119,7 @@ func (cc filteredCache) Get(ctx context.Context, key cr_client.ObjectKey, obj ru
 	return cc.fallback.Get(ctx, key, obj)
 }
 
-func (cc filteredCache) getFromStore(informer cache.SharedIndexInformer, key cr_client.ObjectKey, obj runtime.Object) error {
+func (cc filteredCache) getFromStore(informer toolscache.SharedIndexInformer, key client.ObjectKey, obj runtime.Object) error {
 	gvk, err := apiutil.GVKForObject(obj, cc.Scheme)
 	if err != nil {
 		return err
@@ -130,6 +131,7 @@ func (cc filteredCache) getFromStore(informer cache.SharedIndexInformer, key cr_
 	} else {
 		keyString = key.Namespace + "/" + key.Name
 	}
+
 	item, exists, err := informer.GetStore().GetByKey(keyString)
 	if err != nil {
 		klog.Info("Failed to get item from cache", "error", err)
@@ -159,7 +161,7 @@ func (cc filteredCache) getFromStore(informer cache.SharedIndexInformer, key cr_
 	return nil
 }
 
-func (cc filteredCache) getFromClient(ctx context.Context, key cr_client.ObjectKey, obj runtime.Object) error {
+func (cc filteredCache) getFromClient(ctx context.Context, key client.ObjectKey, obj runtime.Object) error {
 
 	gvk, err := apiutil.GVKForObject(obj, cc.Scheme)
 	if err != nil {
@@ -179,7 +181,7 @@ func (cc filteredCache) getFromClient(ctx context.Context, key cr_client.ObjectK
 	if apierrors.IsNotFound(err) {
 		return err
 	} else if err != nil {
-		klog.Infof("Failed to retrieve %s %s. err: %s", gvk.Kind, key.Name, err)
+		klog.Info("Failed to retrieve resource list", "error", err)
 		return err
 	}
 
@@ -197,7 +199,7 @@ func (cc filteredCache) getFromClient(ctx context.Context, key cr_client.ObjectK
 }
 
 // List lists items out of the indexer and writes them to list
-func (cc filteredCache) List(ctx context.Context, list runtime.Object, opts ...cr_client.ListOption) error {
+func (cc filteredCache) List(ctx context.Context, list runtime.Object, opts ...client.ListOption) error {
 	gvk, err := apiutil.GVKForObject(list, cc.Scheme)
 	if err != nil {
 		return err
@@ -206,7 +208,7 @@ func (cc filteredCache) List(ctx context.Context, list runtime.Object, opts ...c
 		// Construct filter
 		var objList []interface{}
 
-		listOpts := cr_client.ListOptions{}
+		listOpts := client.ListOptions{}
 		listOpts.ApplyOptions(opts)
 
 		objList = informer.GetStore().List()
@@ -215,7 +217,7 @@ func (cc filteredCache) List(ctx context.Context, list runtime.Object, opts ...c
 		if listOpts.LabelSelector != nil {
 			labelSel = listOpts.LabelSelector
 		} else {
-			return cc.fallback.List(ctx, list, opts...)
+			return cc.ListFromClient(ctx, list, opts...)
 		}
 
 		runtimeObjList := make([]runtime.Object, 0, len(objList))
@@ -251,7 +253,45 @@ func (cc filteredCache) List(ctx context.Context, list runtime.Object, opts ...c
 	return cc.fallback.List(ctx, list, opts...)
 }
 
-func (cc filteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cr_cache.Informer, error) {
+func (cc filteredCache) ListFromClient(ctx context.Context, list runtime.Object, opts ...client.ListOption) error {
+
+	gvk, err := apiutil.GVKForObject(list, cc.Scheme)
+	if err != nil {
+		return err
+	}
+
+	listOpts := client.ListOptions{}
+	listOpts.ApplyOptions(opts)
+
+	resource := kindToResource(gvk.Kind[:len(gvk.Kind)-4])
+
+	result, err := cc.clientSet.CoreV1().RESTClient().
+		Get().
+		Namespace(listOpts.Namespace).
+		Resource(resource).
+		VersionedParams(&metav1.ListOptions{}, metav1.ParameterCodec).
+		Do(ctx).
+		Get()
+
+	if err != nil {
+		klog.Info("Failed to retrieve resource list: ", err)
+		return err
+	}
+
+	// Copy the value of the item in the cache to the returned value
+	objVal := reflect.ValueOf(list)
+	itemVal := reflect.ValueOf(result)
+
+	if !objVal.Type().AssignableTo(objVal.Type()) {
+		return fmt.Errorf("cache had type %s, but %s was asked for", itemVal.Type(), objVal.Type())
+	}
+	reflect.Indirect(objVal).Set(reflect.Indirect(itemVal))
+	list.GetObjectKind().SetGroupVersionKind(gvk)
+
+	return nil
+}
+
+func (cc filteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cache.Informer, error) {
 	gvk, err := apiutil.GVKForObject(obj, cc.Scheme)
 	if err != nil {
 		return nil, err
@@ -264,7 +304,7 @@ func (cc filteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cr
 	return cc.fallback.GetInformer(ctx, obj)
 }
 
-func (cc filteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cr_cache.Informer, error) {
+func (cc filteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
 	if informer, ok := cc.informerMap[gvk]; ok {
 		return informer, nil
 	}
@@ -282,7 +322,7 @@ func (cc filteredCache) Start(stopCh <-chan struct{}) error {
 
 func (cc filteredCache) WaitForCacheSync(stop <-chan struct{}) bool {
 	// Wait for informer to sync
-	klog.Info("Waiting for informers to sync")
+	klog.Info("Waiting for informer to sync")
 	waiting := true
 	for waiting {
 		select {
@@ -299,7 +339,7 @@ func (cc filteredCache) WaitForCacheSync(stop <-chan struct{}) bool {
 	return cc.fallback.WaitForCacheSync(stop)
 }
 
-func (cc filteredCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue cr_client.IndexerFunc) error {
+func (cc filteredCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue client.IndexerFunc) error {
 	gvk, err := apiutil.GVKForObject(obj, cc.Scheme)
 	if err != nil {
 		return err
