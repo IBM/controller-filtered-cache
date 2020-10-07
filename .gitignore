@@ -19,5 +19,5 @@ bin
 *.swo
 *~
 ### VisualStudioCode ###	
-.vscode	
+.vscode
 .history
