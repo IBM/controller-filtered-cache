@@ -134,7 +134,7 @@ func (c filteredCache) Get(ctx context.Context, key client.ObjectKey, obj runtim
 		// Looking for object from the cache
 		if err := c.getFromStore(informer, key, obj, gvk); err == nil {
 			// If not found the object from cache, then fetch it from k8s apiserver
-		} else if err := c.getFromClient(ctx, key, obj, gvk); err != nil {
+		} else if err := c.getFromClient(key, obj, gvk); err != nil {
 			klog.Error(err)
 			return err
 		}
@@ -185,7 +185,7 @@ func (c filteredCache) getFromStore(informer toolscache.SharedIndexInformer, key
 }
 
 // getFromClient gets the resource by the k8s client
-func (c filteredCache) getFromClient(ctx context.Context, key client.ObjectKey, obj runtime.Object, gvk schema.GroupVersionKind) error {
+func (c filteredCache) getFromClient(key client.ObjectKey, obj runtime.Object, gvk schema.GroupVersionKind) error {
 
 	// Get resource by the kubeClient
 	resource := kindToResource(gvk.Kind)
@@ -195,7 +195,7 @@ func (c filteredCache) getFromClient(ctx context.Context, key client.ObjectKey, 
 		Name(key.Name).
 		Resource(resource).
 		VersionedParams(&metav1.GetOptions{}, metav1.ParameterCodec).
-		Do(ctx).
+		Do().
 		Get()
 
 	if apierrors.IsNotFound(err) {
@@ -232,10 +232,10 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 
 		// If the labelSelector doesn't match, then list resources from the k8sClient
 		if listOpts.LabelSelector == nil {
-			return c.ListFromClient(ctx, list, gvk, opts...)
+			return c.ListFromClient(list, gvk, opts...)
 		}
 		if listOpts.LabelSelector != nil && listOpts.LabelSelector.String() != c.labelSelectorMap[listToGVK(gvk)] {
-			return c.ListFromClient(ctx, list, gvk, opts...)
+			return c.ListFromClient(list, gvk, opts...)
 		}
 
 		// Check the labelSelector
@@ -282,7 +282,7 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 }
 
 // ListFromClient implements list resource by k8sClient
-func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, gvk schema.GroupVersionKind, opts ...client.ListOption) error {
+func (c filteredCache) ListFromClient(list runtime.Object, gvk schema.GroupVersionKind, opts ...client.ListOption) error {
 
 	listOpts := client.ListOptions{}
 	listOpts.ApplyOptions(opts)
@@ -306,7 +306,7 @@ func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, 
 			LabelSelector: labelSelector,
 			FieldSelector: fieldSelector,
 		}, metav1.ParameterCodec).
-		Do(ctx).
+		Do().
 		Get()
 
 	if err != nil {
@@ -328,7 +328,7 @@ func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, 
 
 // GetInformer fetches or constructs an informer for the given object that corresponds to a single
 // API kind and resource.
-func (c filteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cache.Informer, error) {
+func (c filteredCache) GetInformer(obj runtime.Object) (cache.Informer, error) {
 	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
 	if err != nil {
 		return nil, err
@@ -338,17 +338,17 @@ func (c filteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cac
 		return informer, nil
 	}
 	// Passthrough
-	return c.fallback.GetInformer(ctx, obj)
+	return c.fallback.GetInformer(obj)
 }
 
 // GetInformerForKind is similar to GetInformer, except that it takes a group-version-kind, instead
 // of the underlying object.
-func (c filteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
+func (c filteredCache) GetInformerForKind(gvk schema.GroupVersionKind) (cache.Informer, error) {
 	if informer, ok := c.informerMap[gvk]; ok {
 		return informer, nil
 	}
 	// Passthrough
-	return c.fallback.GetInformerForKind(ctx, gvk)
+	return c.fallback.GetInformerForKind(gvk)
 }
 
 // Start runs all the informers known to this cache until the given channel is closed.
@@ -381,7 +381,7 @@ func (c filteredCache) WaitForCacheSync(stop <-chan struct{}) bool {
 
 // IndexField adds an indexer to the underlying cache, using extraction function to get
 // value(s) from the given field. The filtered cache doesn't support the index yet.
-func (c filteredCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue client.IndexerFunc) error {
+func (c filteredCache) IndexField(obj runtime.Object, field string, extractValue client.IndexerFunc) error {
 	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
 	if err != nil {
 		return err
@@ -392,7 +392,7 @@ func (c filteredCache) IndexField(ctx context.Context, obj runtime.Object, field
 		return errors.New("IndexField for " + gvk.String() + " not supported")
 	}
 
-	return c.fallback.IndexField(ctx, obj, field, extractValue)
+	return c.fallback.IndexField(obj, field, extractValue)
 }
 
 // kindToResource converts kind to resource
