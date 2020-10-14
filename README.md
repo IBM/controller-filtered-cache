@@ -35,7 +35,7 @@ The controller-filtered-cache is used to customize operator cache when initializ
 
     The above example means the operator cache will only store the `Secret` and `ConfigMap` with label `managed-by-controller`.
 
-    **Note:** `corev1` in the above example is from `corev1 "k8s.io/api/core/v1"`
+    **Note:** `corev1` in the above example is from `corev1 "k8s.io/api/core/v1"`. The controller-filtered-cache only supports the resources from `core` api group.
 
 1. Add the customized cache into the operator manager
 
@@ -51,3 +51,9 @@ The controller-filtered-cache is used to customize operator cache when initializ
     ```
 
     Using `NewFilteredCacheBuilder` function to create a customized map based on `gvkLabelMap` we created in Step 2.
+
+## Limitation
+
+1. It only supports `labelSelector` but not the `fieldSelector`.
+
+1. Since the controller-filtered-cache uses the `clientSet.CoreV1().RESTClient()` as client to get and list resource, controller-filtered-cache can only support the resource from the core api group, like `Pod`, `ConfigMap` and `Secret`. For the other resources, like `deployment` and `job`, users can customize your own filtered cache based on `filteredcache/filtered-cache.go` file.
