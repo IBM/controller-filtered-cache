@@ -81,7 +81,7 @@ func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLa
 		plural := kindToResource(gvk.Kind)
 
 		// Create ListerWatcher with the label by NewFilteredListWatchFromClient
-		listerWatcher := toolscache.NewFilteredListWatchFromClient(clientSet.CoreV1().RESTClient(), plural, opts.Namespace, func(options *metav1.ListOptions) {
+		listerWatcher := toolscache.NewFilteredListWatchFromClient(getClientForGVK(gvk, clientSet), plural, opts.Namespace, func(options *metav1.ListOptions) {
 			options.LabelSelector = label
 		})
 
@@ -126,7 +126,6 @@ func (c filteredCache) Get(ctx context.Context, key client.ObjectKey, obj runtim
 	// Get the GVK of the runtime object
 	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
 	if err != nil {
-		klog.Error(err)
 		return err
 	}
 
@@ -135,7 +134,6 @@ func (c filteredCache) Get(ctx context.Context, key client.ObjectKey, obj runtim
 		if err := c.getFromStore(informer, key, obj, gvk); err == nil {
 			// If not found the object from cache, then fetch it from k8s apiserver
 		} else if err := c.getFromClient(key, obj, gvk); err != nil {
-			klog.Error(err)
 			return err
 		}
 		return nil
@@ -189,7 +187,7 @@ func (c filteredCache) getFromClient(key client.ObjectKey, obj runtime.Object, g
 
 	// Get resource by the kubeClient
 	resource := kindToResource(gvk.Kind)
-	result, err := c.clientSet.CoreV1().RESTClient().
+	result, err := getClientForGVK(gvk, c.clientSet).
 		Get().
 		Namespace(key.Namespace).
 		Name(key.Name).
@@ -298,7 +296,7 @@ func (c filteredCache) ListFromClient(list runtime.Object, gvk schema.GroupVersi
 
 	resource := kindToResource(gvk.Kind[:len(gvk.Kind)-4])
 
-	result, err := c.clientSet.CoreV1().RESTClient().
+	result, err := getClientForGVK(gvk, c.clientSet).
 		Get().
 		Namespace(listOpts.Namespace).
 		Resource(resource).
