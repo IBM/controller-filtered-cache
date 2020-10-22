@@ -67,7 +67,7 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string) cac
 		}
 
 		// Return the customized cache
-		return filteredCache{clientSet: clientSet, informerMap: informerMap, labelSelectorMap: gvkLabelMap, fallback: fallback, Scheme: opts.Scheme}, nil
+		return filteredCache{clientSet: clientSet, informerMap: informerMap, labelSelectorMap: gvkLabelMap, fallback: fallback, namespace: opts.Namespace, Scheme: opts.Scheme}, nil
 	}
 }
 
@@ -115,6 +115,7 @@ type filteredCache struct {
 	informerMap      map[schema.GroupVersionKind]toolscache.SharedIndexInformer
 	labelSelectorMap map[schema.GroupVersionKind]string
 	fallback         cache.Cache
+	namespace        string
 	Scheme           *runtime.Scheme
 }
 
@@ -228,14 +229,6 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 		listOpts := client.ListOptions{}
 		listOpts.ApplyOptions(opts)
 
-		// If the labelSelector doesn't match, then list resources from the k8sClient
-		if listOpts.LabelSelector == nil {
-			return c.ListFromClient(ctx, list, gvk, opts...)
-		}
-		if listOpts.LabelSelector != nil && listOpts.LabelSelector.String() != c.labelSelectorMap[listToGVK(gvk)] {
-			return c.ListFromClient(ctx, list, gvk, opts...)
-		}
-
 		// Check the labelSelector
 		var labelSel labels.Selector
 		if listOpts.LabelSelector != nil {
@@ -244,6 +237,10 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 
 		// Get the list from the cache
 		objList = informer.GetStore().List()
+
+		if len(objList) == 0 {
+			return c.ListFromClient(ctx, list, gvk, opts...)
+		}
 
 		// Check namespace and labelSelector
 		runtimeObjList := make([]runtime.Object, 0, len(objList))
@@ -257,7 +254,18 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 				return err
 			}
 
-			if listOpts.Namespace != "" && listOpts.Namespace != meta.GetNamespace() {
+			var namespace string
+
+			if c.namespace != "" {
+				if listOpts.Namespace != "" && c.namespace != listOpts.Namespace {
+					return fmt.Errorf("unable to list from namespace : %v because of unknown namespace for the cache", listOpts.Namespace)
+				}
+				namespace = c.namespace
+			} else if listOpts.Namespace != "" {
+				namespace = listOpts.Namespace
+			}
+
+			if namespace != "" && namespace != meta.GetNamespace() {
 				continue
 			}
 
@@ -294,11 +302,22 @@ func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, 
 		labelSelector = listOpts.LabelSelector.String()
 	}
 
+	var namespace string
+
+	if c.namespace != "" {
+		if listOpts.Namespace != "" && c.namespace != listOpts.Namespace {
+			return fmt.Errorf("unable to list from namespace : %v because of unknown namespace for the cache", listOpts.Namespace)
+		}
+		namespace = c.namespace
+	} else if listOpts.Namespace != "" {
+		namespace = listOpts.Namespace
+	}
+
 	resource := kindToResource(gvk.Kind[:len(gvk.Kind)-4])
 
 	result, err := getClientForGVK(gvk, c.clientSet).
 		Get().
-		Namespace(listOpts.Namespace).
+		Namespace(namespace).
 		Resource(resource).
 		VersionedParams(&metav1.ListOptions{
 			LabelSelector: labelSelector,
