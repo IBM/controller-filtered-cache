@@ -229,14 +229,6 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 		listOpts := client.ListOptions{}
 		listOpts.ApplyOptions(opts)
 
-		// If the labelSelector doesn't match, then list resources from the k8sClient
-		if listOpts.LabelSelector == nil {
-			return c.ListFromClient(ctx, list, gvk, opts...)
-		}
-		if listOpts.LabelSelector != nil && listOpts.LabelSelector.String() != c.labelSelectorMap[listToGVK(gvk)] {
-			return c.ListFromClient(ctx, list, gvk, opts...)
-		}
-
 		// Check the labelSelector
 		var labelSel labels.Selector
 		if listOpts.LabelSelector != nil {
@@ -245,6 +237,10 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 
 		// Get the list from the cache
 		objList = informer.GetStore().List()
+
+		if len(objList) == 0 {
+			return c.ListFromClient(ctx, list, gvk, opts...)
+		}
 
 		// Check namespace and labelSelector
 		runtimeObjList := make([]runtime.Object, 0, len(objList))
