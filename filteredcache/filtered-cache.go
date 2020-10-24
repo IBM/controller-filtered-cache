@@ -18,7 +18,6 @@ package filteredcache
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -29,9 +28,11 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
@@ -99,8 +100,7 @@ func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLa
 		}
 
 		// Create new inforemer with the listerwatcher
-		informer := toolscache.NewSharedIndexInformer(listerWatcher, typed, resync, toolscache.Indexers{})
-
+		informer := toolscache.NewSharedIndexInformer(listerWatcher, typed, resync, toolscache.Indexers{toolscache.NamespaceIndex: toolscache.MetaNamespaceIndexFunc})
 		informerMap[gvk] = informer
 		// Build list type for the GVK
 		gvkList := schema.GroupVersionKind{Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind + "List"}
@@ -236,8 +236,28 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 			labelSel = listOpts.LabelSelector
 		}
 
-		// Get the list from the cache
-		objList = informer.GetStore().List()
+		if listOpts.FieldSelector != nil {
+			// combining multiple indices, GetIndexers, etc
+			field, val, requiresExact := requiresExactMatch(listOpts.FieldSelector)
+			if !requiresExact {
+				return fmt.Errorf("non-exact field matches are not supported by the cache")
+			}
+			// list all objects by the field selector.  If this is namespaced and we have one, ask for the
+			// namespaced index key.  Otherwise, ask for the non-namespaced variant by using the fake "all namespaces"
+			// namespace.
+			objList, err = informer.GetIndexer().ByIndex(FieldIndexName(field), KeyToNamespacedKey(listOpts.Namespace, val))
+		} else if listOpts.Namespace != "" {
+			objList, err = informer.GetIndexer().ByIndex(toolscache.NamespaceIndex, listOpts.Namespace)
+		} else {
+			objList = informer.GetIndexer().List()
+		}
+		if err != nil {
+			return err
+		}
+
+		if len(objList) == 0 {
+			return c.ListFromClient(ctx, list, gvk, opts...)
+		}
 
 		if len(objList) == 0 {
 			return c.ListFromClient(ctx, list, gvk, opts...)
@@ -405,12 +425,50 @@ func (c filteredCache) IndexField(obj runtime.Object, field string, extractValue
 		return err
 	}
 
-	if _, ok := c.informerMap[gvk]; ok {
-		klog.Infof("IndexField for %s not supported", gvk.String())
-		return errors.New("IndexField for " + gvk.String() + " not supported")
+	if informer, ok := c.informerMap[gvk]; ok {
+		return indexByField(informer, field, extractValue)
 	}
 
 	return c.fallback.IndexField(obj, field, extractValue)
+}
+
+func indexByField(indexer cache.Informer, field string, extractor client.IndexerFunc) error {
+	indexFunc := func(objRaw interface{}) ([]string, error) {
+		// TODO(directxman12): check if this is the correct type?
+		obj, isObj := objRaw.(runtime.Object)
+		if !isObj {
+			return nil, fmt.Errorf("object of type %T is not an Object", objRaw)
+		}
+		meta, err := apimeta.Accessor(obj)
+		if err != nil {
+			return nil, err
+		}
+		ns := meta.GetNamespace()
+
+		rawVals := extractor(obj)
+		var vals []string
+		if ns == "" {
+			// if we're not doubling the keys for the namespaced case, just re-use what was returned to us
+			vals = rawVals
+		} else {
+			// if we need to add non-namespaced versions too, double the length
+			vals = make([]string, len(rawVals)*2)
+		}
+		for i, rawVal := range rawVals {
+			// save a namespaced variant, so that we can ask
+			// "what are all the object matching a given index *in a given namespace*"
+			vals[i] = KeyToNamespacedKey(ns, rawVal)
+			if ns != "" {
+				// if we have a namespace, also inject a special index key for listing
+				// regardless of the object namespace
+				vals[i+len(rawVals)] = KeyToNamespacedKey("", rawVal)
+			}
+		}
+
+		return vals, nil
+	}
+
+	return indexer.AddIndexers(toolscache.Indexers{FieldIndexName(field): indexFunc})
 }
 
 // kindToResource converts kind to resource
@@ -421,4 +479,35 @@ func kindToResource(kind string) string {
 // listToGVK converts GVK list to GVK
 func listToGVK(list schema.GroupVersionKind) schema.GroupVersionKind {
 	return schema.GroupVersionKind{Group: list.Group, Version: list.Version, Kind: list.Kind[:len(list.Kind)-4]}
+}
+
+// requiresExactMatch checks if the given field selector is of the form `k=v` or `k==v`.
+func requiresExactMatch(sel fields.Selector) (field, val string, required bool) {
+	reqs := sel.Requirements()
+	if len(reqs) != 1 {
+		return "", "", false
+	}
+	req := reqs[0]
+	if req.Operator != selection.Equals && req.Operator != selection.DoubleEquals {
+		return "", "", false
+	}
+	return req.Field, req.Value, true
+}
+
+// FieldIndexName constructs the name of the index over the given field,
+// for use with an indexer.
+func FieldIndexName(field string) string {
+	return "field:" + field
+}
+
+// noNamespaceNamespace is used as the "namespace" when we want to list across all namespaces
+const allNamespacesNamespace = "__all_namespaces"
+
+// KeyToNamespacedKey prefixes the given index key with a namespace
+// for use in field selector indexes.
+func KeyToNamespacedKey(ns string, baseKey string) string {
+	if ns != "" {
+		return ns + "/" + baseKey
+	}
+	return allNamespacesNamespace + "/" + baseKey
 }
