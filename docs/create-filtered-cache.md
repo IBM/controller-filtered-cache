@@ -43,14 +43,14 @@ This map is used to set the Kubernetes resource and the label applied to the cac
 
 ```yaml
 gvkLabelMap := map[schema.GroupVersionKind]filteredcache.Selector{
-    corev1.SchemeGroupVersion.WithKind("Secret"): filteredcache.Selector{
+    corev1.SchemeGroupVersion.WithKind("Secret"): {
         FieldSelector: "metadata.name==mongodb-admin",
         LabelSelector: "managedBy",
     },
-    corev1.SchemeGroupVersion.WithKind("ConfigMap"): filteredcache.Selector{
+    corev1.SchemeGroupVersion.WithKind("ConfigMap"): {
         LabelSelector: "managedBy==mongodb",
     },
-    appsv1.SchemeGroupVersion.WithKind("Deployment"): filteredcache.Selector{
+    appsv1.SchemeGroupVersion.WithKind("Deployment"): {
         LabelSelector: "app",
     },
 }
