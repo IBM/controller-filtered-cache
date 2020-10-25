@@ -12,9 +12,9 @@ This controller-filtered-cache provides an implement for the operator to add a l
 
 It supports the native kubernetes resources from GroupVersions: `corev1`, `appsv1`, `batchv1`, `certificatesv1beta1`, `corev1`, `networkingv1`, `rbacv1` and `storagev1`.
 
-## How to use
+## How to use controller-filtered-cache
 
-[How to customize filtered cache](docs/create-filtered-cache.md)
+[How to create filtered cache](docs/create-filtered-cache.md)
 
 ## Limitation
 
