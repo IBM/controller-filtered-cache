@@ -87,15 +87,15 @@ func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLa
 		// Get the plural type of the kind as resource
 		plural := kindToResource(gvk.Kind)
 
+		fieldSelector := selector.FieldSelector
+		labelSelector := selector.LabelSelector
+		selectorFunc := func(options *metav1.ListOptions) {
+			options.FieldSelector = fieldSelector
+			options.LabelSelector = labelSelector
+		}
+
 		// Create ListerWatcher with the label by NewFilteredListWatchFromClient
-		listerWatcher := toolscache.NewFilteredListWatchFromClient(getClientForGVK(gvk, clientSet), plural, opts.Namespace, func(options *metav1.ListOptions) {
-			if selector.FieldSelector != "" {
-				options.FieldSelector = selector.FieldSelector
-			}
-			if selector.LabelSelector != "" {
-				options.LabelSelector = selector.LabelSelector
-			}
-		})
+		listerWatcher := toolscache.NewFilteredListWatchFromClient(getClientForGVK(gvk, clientSet), plural, opts.Namespace, selectorFunc)
 
 		// Build typed runtime object for informer
 		objType := &unstructured.Unstructured{}
