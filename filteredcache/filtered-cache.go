@@ -43,7 +43,7 @@ import (
 )
 
 // NewFilteredCacheBuilder implements a customized cache with a filter for specified resources
-func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string) cache.NewCacheFunc {
+func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]Selector) cache.NewCacheFunc {
 	return func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
 		// Create a client for fetching resources
 		clientSet, err := kubernetes.NewForConfig(config)
@@ -68,22 +68,33 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string) cac
 		}
 
 		// Return the customized cache
-		return filteredCache{clientSet: clientSet, informerMap: informerMap, labelSelectorMap: gvkLabelMap, fallback: fallback, namespace: opts.Namespace, Scheme: opts.Scheme}, nil
+		return filteredCache{clientSet: clientSet, informerMap: informerMap, fallback: fallback, namespace: opts.Namespace, Scheme: opts.Scheme}, nil
 	}
 }
 
+// Selector contains LabelSelector FieldSelector
+type Selector struct {
+	LabelSelector string
+	FieldSelector string
+}
+
 //buildInformerMap generates informerMap of the specified resource
-func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLabelMap map[schema.GroupVersionKind]string, resync time.Duration) map[schema.GroupVersionKind]toolscache.SharedIndexInformer {
+func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLabelMap map[schema.GroupVersionKind]Selector, resync time.Duration) map[schema.GroupVersionKind]toolscache.SharedIndexInformer {
 	// Initialize informerMap
 	informerMap := make(map[schema.GroupVersionKind]toolscache.SharedIndexInformer)
 
-	for gvk, label := range gvkLabelMap {
+	for gvk, selector := range gvkLabelMap {
 		// Get the plural type of the kind as resource
 		plural := kindToResource(gvk.Kind)
 
 		// Create ListerWatcher with the label by NewFilteredListWatchFromClient
 		listerWatcher := toolscache.NewFilteredListWatchFromClient(getClientForGVK(gvk, clientSet), plural, opts.Namespace, func(options *metav1.ListOptions) {
-			options.LabelSelector = label
+			if selector.FieldSelector != "" {
+				options.FieldSelector = selector.FieldSelector
+			}
+			if selector.LabelSelector != "" {
+				options.LabelSelector = selector.LabelSelector
+			}
 		})
 
 		// Build typed runtime object for informer
@@ -111,12 +122,11 @@ func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLa
 
 // filteredCache is the customized cache by the specified label
 type filteredCache struct {
-	clientSet        *kubernetes.Clientset
-	informerMap      map[schema.GroupVersionKind]toolscache.SharedIndexInformer
-	labelSelectorMap map[schema.GroupVersionKind]string
-	fallback         cache.Cache
-	namespace        string
-	Scheme           *runtime.Scheme
+	clientSet   *kubernetes.Clientset
+	informerMap map[schema.GroupVersionKind]toolscache.SharedIndexInformer
+	fallback    cache.Cache
+	namespace   string
+	Scheme      *runtime.Scheme
 }
 
 // Get implements Reader
