@@ -107,7 +107,7 @@ mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
     Port:               9443,
     LeaderElection:     enableLeaderElection,
     LeaderElectionID:   "2e672f4a.ibm.com",
-    NewCache:           cache.NewFilteredCacheBuilder(gvkLabelMap, namespaces),
+    NewCache:           cache.MultiNamespacedFilteredCacheBuilder(gvkLabelMap, namespaces),
 })
 ```
 
@@ -120,6 +120,6 @@ namespaces := []string{"foo", "bar"} // List of Namespaces
 mgr, err := manager.New(cfg, manager.Options{
     Namespace:          namespace,
     MetricsBindAddress: fmt.Sprintf("%s:%d", metricsHost, metricsPort),
-    NewCache:           cache.NewFilteredCacheBuilder(gvkLabelMap, namespaces),
+    NewCache:           cache.MultiNamespacedFilteredCacheBuilder(gvkLabelMap, namespaces),
 })
 ```
