@@ -33,7 +33,7 @@ import (
 )
 
 // MultiNamespacedFilteredCacheBuilder implements a customized cache with a filter for specified resources with multiple namespaces
-func MultiNamespacedFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]string, namespaces []string) cache.NewCacheFunc {
+func MultiNamespacedFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]Selector, namespaces []string) cache.NewCacheFunc {
 	return func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
 
 		filteredCaches := map[string]cache.Cache{}
