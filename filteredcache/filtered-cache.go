@@ -33,7 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -45,11 +44,6 @@ import (
 // NewFilteredCacheBuilder implements a customized cache with a filter for specified resources
 func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]Selector) cache.NewCacheFunc {
 	return func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
-		// Create a client for fetching resources
-		clientSet, err := kubernetes.NewForConfig(config)
-		if err != nil {
-			return nil, err
-		}
 
 		// Get the frequency that informers are resynced
 		var resync time.Duration
@@ -58,7 +52,10 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]Selector) c
 		}
 
 		// Generate informermap to contain the gvks and their informers
-		informerMap := buildInformerMap(clientSet, opts, gvkLabelMap, resync)
+		informerMap, err := buildInformerMap(config, opts, gvkLabelMap, resync)
+		if err != nil {
+			return nil, err
+		}
 
 		// Create a default cache for the unspecified resources
 		fallback, err := cache.New(config, opts)
@@ -68,7 +65,7 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]Selector) c
 		}
 
 		// Return the customized cache
-		return filteredCache{clientSet: clientSet, informerMap: informerMap, fallback: fallback, namespace: opts.Namespace, Scheme: opts.Scheme}, nil
+		return filteredCache{config: config, informerMap: informerMap, fallback: fallback, namespace: opts.Namespace, Scheme: opts.Scheme}, nil
 	}
 }
 
@@ -79,7 +76,7 @@ type Selector struct {
 }
 
 //buildInformerMap generates informerMap of the specified resource
-func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLabelMap map[schema.GroupVersionKind]Selector, resync time.Duration) map[schema.GroupVersionKind]toolscache.SharedIndexInformer {
+func buildInformerMap(config *rest.Config, opts cache.Options, gvkLabelMap map[schema.GroupVersionKind]Selector, resync time.Duration) (map[schema.GroupVersionKind]toolscache.SharedIndexInformer, error) {
 	// Initialize informerMap
 	informerMap := make(map[schema.GroupVersionKind]toolscache.SharedIndexInformer)
 
@@ -95,19 +92,21 @@ func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLa
 		}
 
 		// Create ListerWatcher with the label by NewFilteredListWatchFromClient
-		listerWatcher := toolscache.NewFilteredListWatchFromClient(getClientForGVK(gvk, clientSet), plural, opts.Namespace, selectorFunc)
+		client, err := getClientForGVK(gvk, config, opts.Scheme)
+		if err != nil {
+			return nil, err
+		}
+		listerWatcher := toolscache.NewFilteredListWatchFromClient(client, plural, opts.Namespace, selectorFunc)
 
 		// Build typed runtime object for informer
 		objType := &unstructured.Unstructured{}
 		objType.GetObjectKind().SetGroupVersionKind(gvk)
 		typed, err := opts.Scheme.New(gvk)
 		if err != nil {
-			klog.Error(err)
-			continue
+			return nil, err
 		}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(objType.UnstructuredContent(), typed); err != nil {
-			klog.Error(err)
-			continue
+			return nil, err
 		}
 
 		// Create new inforemer with the listerwatcher
@@ -117,12 +116,12 @@ func buildInformerMap(clientSet *kubernetes.Clientset, opts cache.Options, gvkLa
 		gvkList := schema.GroupVersionKind{Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind + "List"}
 		informerMap[gvkList] = informer
 	}
-	return informerMap
+	return informerMap, nil
 }
 
 // filteredCache is the customized cache by the specified label
 type filteredCache struct {
-	clientSet   *kubernetes.Clientset
+	config      *rest.Config
 	informerMap map[schema.GroupVersionKind]toolscache.SharedIndexInformer
 	fallback    cache.Cache
 	namespace   string
@@ -198,7 +197,12 @@ func (c filteredCache) getFromClient(ctx context.Context, key client.ObjectKey, 
 
 	// Get resource by the kubeClient
 	resource := kindToResource(gvk.Kind)
-	result, err := getClientForGVK(gvk, c.clientSet).
+
+	client, err := getClientForGVK(gvk, c.config, c.Scheme)
+	if err != nil {
+		return err
+	}
+	result, err := client.
 		Get().
 		Namespace(key.Namespace).
 		Name(key.Name).
@@ -345,7 +349,11 @@ func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, 
 
 	resource := kindToResource(gvk.Kind[:len(gvk.Kind)-4])
 
-	result, err := getClientForGVK(gvk, c.clientSet).
+	client, err := getClientForGVK(gvk, c.config, c.Scheme)
+	if err != nil {
+		return err
+	}
+	result, err := client.
 		Get().
 		Namespace(namespace).
 		Resource(resource).
@@ -403,6 +411,7 @@ func (c filteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupV
 func (c filteredCache) Start(stopCh <-chan struct{}) error {
 	klog.Info("Start filtered cache")
 	for _, informer := range c.informerMap {
+		informer := informer
 		go informer.Run(stopCh)
 	}
 	return c.fallback.Start(stopCh)
