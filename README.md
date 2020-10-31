@@ -9,8 +9,7 @@ When an operator watches, lists or gets a Kubernetes resource type, the operator
 This will cause if there are a huge number of this kind of resource in the cluster, the operator will consume a large number of computing resources on the caching the Kubernetes resource that it won't use.
 
 This controller-filtered-cache provides an implement for the operator to add a label selector to the operator cache. It will only store the resources with a specific label, which helps in reducing cache, memory footprint and CPU requirements.
-
-It supports the native kubernetes resources from GroupVersions: `corev1`, `appsv1`, `batchv1`, `certificatesv1beta1`, `networkingv1`, `rbacv1` and `storagev1`.
+.
 
 ## How to use controller-filtered-cache
 

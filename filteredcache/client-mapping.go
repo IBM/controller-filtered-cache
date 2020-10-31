@@ -24,27 +24,50 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
 )
 
-func getClientForGVK(gvk schema.GroupVersionKind, k8sClient *kubernetes.Clientset) toolscache.Getter {
+func getClientForGVK(gvk schema.GroupVersionKind, config *rest.Config, scheme *runtime.Scheme) (toolscache.Getter, error) {
+	// Create a client for fetching resources
+	k8sClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
 	switch gvk.GroupVersion() {
 	case corev1.SchemeGroupVersion:
-		return k8sClient.CoreV1().RESTClient()
+		return k8sClient.CoreV1().RESTClient(), nil
 	case appsv1.SchemeGroupVersion:
-		return k8sClient.AppsV1().RESTClient()
+		return k8sClient.AppsV1().RESTClient(), nil
 	case batchv1.SchemeGroupVersion:
-		return k8sClient.BatchV1().RESTClient()
+		return k8sClient.BatchV1().RESTClient(), nil
 	case networkingv1.SchemeGroupVersion:
-		return k8sClient.NetworkingV1().RESTClient()
+		return k8sClient.NetworkingV1().RESTClient(), nil
 	case rbacv1.SchemeGroupVersion:
-		return k8sClient.RbacV1().RESTClient()
+		return k8sClient.RbacV1().RESTClient(), nil
 	case storagev1.SchemeGroupVersion:
-		return k8sClient.StorageV1().RESTClient()
+		return k8sClient.StorageV1().RESTClient(), nil
 	case certificatesv1beta1.SchemeGroupVersion:
-		return k8sClient.CertificatesV1beta1().RESTClient()
+		return k8sClient.CertificatesV1beta1().RESTClient(), nil
+	default:
+		gv := gvk.GroupVersion()
+		cfg := rest.CopyConfig(config)
+		cfg.GroupVersion = &gv
+		if gvk.Group == "" {
+			cfg.APIPath = "/api"
+		} else {
+			cfg.APIPath = "/apis"
+		}
+		if cfg.UserAgent == "" {
+			cfg.UserAgent = rest.DefaultKubernetesUserAgent()
+		}
+		if cfg.NegotiatedSerializer == nil {
+			cfg.NegotiatedSerializer = serializer.WithoutConversionCodecFactory{CodecFactory: serializer.NewCodecFactory(scheme)}
+		}
+		return rest.RESTClientFor(cfg)
 	}
-	return nil
 }
