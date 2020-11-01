@@ -156,10 +156,10 @@ func (i *multiNamespaceInformer) AddIndexers(indexers toolscache.Indexers) error
 
 // GetInformer fetches or constructs an informer for the given object that corresponds to a single
 // API kind and resource.
-func (c multiNamespacefilteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cache.Informer, error) {
+func (c multiNamespacefilteredCache) GetInformer(obj runtime.Object) (cache.Informer, error) {
 	informers := map[string]cache.Informer{}
 	for ns, cache := range c.namespaceToCache {
-		informer, err := cache.GetInformer(ctx, obj)
+		informer, err := cache.GetInformer(obj)
 		if err != nil {
 			return nil, err
 		}
@@ -170,10 +170,10 @@ func (c multiNamespacefilteredCache) GetInformer(ctx context.Context, obj runtim
 
 // GetInformerForKind is similar to GetInformer, except that it takes a group-version-kind, instead
 // of the underlying object.
-func (c multiNamespacefilteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
+func (c multiNamespacefilteredCache) GetInformerForKind(gvk schema.GroupVersionKind) (cache.Informer, error) {
 	informers := map[string]cache.Informer{}
 	for ns, cache := range c.namespaceToCache {
-		informer, err := cache.GetInformerForKind(ctx, gvk)
+		informer, err := cache.GetInformerForKind(gvk)
 		if err != nil {
 			return nil, err
 		}
@@ -210,9 +210,9 @@ func (c multiNamespacefilteredCache) WaitForCacheSync(stop <-chan struct{}) bool
 
 // IndexField adds an indexer to the underlying cache, using extraction function to get
 // value(s) from the given field. The filtered cache doesn't support the index yet.
-func (c multiNamespacefilteredCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue client.IndexerFunc) error {
-	for _, cache := range c.namespaceToCache {
-		if err := cache.IndexField(ctx, obj, field, extractValue); err != nil {
+func (c multiNamespacefilteredCache) IndexField(obj runtime.Object, field string, extractValue client.IndexerFunc) error {
+	for _, filteredcache := range c.namespaceToCache {
+		if err := filteredcache.IndexField(obj, field, extractValue); err != nil {
 			return err
 		}
 	}

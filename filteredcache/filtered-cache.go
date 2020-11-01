@@ -243,7 +243,6 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 		listOpts := client.ListOptions{}
 		listOpts.ApplyOptions(opts)
 
-
 		// Check the labelSelector
 		var labelSel labels.Selector
 		if listOpts.LabelSelector != nil {
@@ -270,11 +269,11 @@ func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...cl
 		}
 
 		if len(objList) == 0 {
-			return c.ListFromClient(ctx, list, gvk, opts...)
+			return c.ListFromClient(list, gvk, opts...)
 		}
 
 		if len(objList) == 0 {
-			return c.ListFromClient(ctx, list, gvk, opts...)
+			return c.ListFromClient(list, gvk, opts...)
 		}
 
 		// Check namespace and labelSelector
