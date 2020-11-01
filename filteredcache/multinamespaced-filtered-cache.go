@@ -91,9 +91,9 @@ func (c multiNamespacefilteredCache) List(ctx context.Context, list runtime.Obje
 		return err
 	}
 	var resourceVersion string
-	for _, cache := range c.namespaceToCache {
+	for _, filteredcache := range c.namespaceToCache {
 		listObj := list.DeepCopyObject()
-		err = cache.List(ctx, listObj, opts...)
+		err = filteredcache.List(ctx, listObj, opts...)
 		if err != nil {
 			return err
 		}
@@ -158,8 +158,8 @@ func (i *multiNamespaceInformer) AddIndexers(indexers toolscache.Indexers) error
 // API kind and resource.
 func (c multiNamespacefilteredCache) GetInformer(obj runtime.Object) (cache.Informer, error) {
 	informers := map[string]cache.Informer{}
-	for ns, cache := range c.namespaceToCache {
-		informer, err := cache.GetInformer(obj)
+	for ns, filteredcache := range c.namespaceToCache {
+		informer, err := filteredcache.GetInformer(obj)
 		if err != nil {
 			return nil, err
 		}
@@ -172,8 +172,8 @@ func (c multiNamespacefilteredCache) GetInformer(obj runtime.Object) (cache.Info
 // of the underlying object.
 func (c multiNamespacefilteredCache) GetInformerForKind(gvk schema.GroupVersionKind) (cache.Informer, error) {
 	informers := map[string]cache.Informer{}
-	for ns, cache := range c.namespaceToCache {
-		informer, err := cache.GetInformerForKind(gvk)
+	for ns, filteredcache := range c.namespaceToCache {
+		informer, err := filteredcache.GetInformerForKind(gvk)
 		if err != nil {
 			return nil, err
 		}
@@ -200,8 +200,8 @@ func (c multiNamespacefilteredCache) Start(stopCh <-chan struct{}) error {
 // WaitForCacheSync waits for all the caches to sync.  Returns false if it could not sync a cache.
 func (c multiNamespacefilteredCache) WaitForCacheSync(stop <-chan struct{}) bool {
 	synced := true
-	for _, cache := range c.namespaceToCache {
-		if s := cache.WaitForCacheSync(stop); !s {
+	for _, filteredcache := range c.namespaceToCache {
+		if s := filteredcache.WaitForCacheSync(stop); !s {
 			synced = s
 		}
 	}
