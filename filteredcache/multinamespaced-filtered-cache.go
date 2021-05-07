@@ -61,7 +61,7 @@ type multiNamespacefilteredCache struct {
 // Get implements Reader
 // If the resource is in the cache, Get function get fetch in from the informer
 // Otherwise, resource will be get by the k8s client
-func (c multiNamespacefilteredCache) Get(ctx context.Context, key client.ObjectKey, obj runtime.Object) error {
+func (c multiNamespacefilteredCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 	cache, ok := c.namespaceToCache[key.Namespace]
 	if !ok {
 		return fmt.Errorf("unable to get: %v because of unknown namespace for the cache", key)
@@ -70,7 +70,7 @@ func (c multiNamespacefilteredCache) Get(ctx context.Context, key client.ObjectK
 }
 
 // List lists items out of the indexer and writes them to list
-func (c multiNamespacefilteredCache) List(ctx context.Context, list runtime.Object, opts ...client.ListOption) error {
+func (c multiNamespacefilteredCache) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	listOpts := client.ListOptions{}
 	listOpts.ApplyOptions(opts)
 	if listOpts.Namespace != corev1.NamespaceAll {
@@ -92,7 +92,7 @@ func (c multiNamespacefilteredCache) List(ctx context.Context, list runtime.Obje
 	}
 	var resourceVersion string
 	for _, cache := range c.namespaceToCache {
-		listObj := list.DeepCopyObject()
+		listObj := list.DeepCopyObject().(client.ObjectList)
 		err = cache.List(ctx, listObj, opts...)
 		if err != nil {
 			return err
@@ -156,7 +156,7 @@ func (i *multiNamespaceInformer) AddIndexers(indexers toolscache.Indexers) error
 
 // GetInformer fetches or constructs an informer for the given object that corresponds to a single
 // API kind and resource.
-func (c multiNamespacefilteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cache.Informer, error) {
+func (c multiNamespacefilteredCache) GetInformer(ctx context.Context, obj client.Object) (cache.Informer, error) {
 	informers := map[string]cache.Informer{}
 	for ns, cache := range c.namespaceToCache {
 		informer, err := cache.GetInformer(ctx, obj)
@@ -184,24 +184,24 @@ func (c multiNamespacefilteredCache) GetInformerForKind(ctx context.Context, gvk
 
 // Start runs all the informers known to this cache until the given channel is closed.
 // It blocks.
-func (c multiNamespacefilteredCache) Start(stopCh <-chan struct{}) error {
+func (c multiNamespacefilteredCache) Start(ctx context.Context) error {
 	for ns, filteredcache := range c.namespaceToCache {
 		go func(ns string, filteredcache cache.Cache) {
-			err := filteredcache.Start(stopCh)
+			err := filteredcache.Start(ctx)
 			if err != nil {
 				klog.Error(err, "multinamespace cache failed to start namespaced informer", "namespace", ns)
 			}
 		}(ns, filteredcache)
 	}
-	<-stopCh
+	<-ctx.Done()
 	return nil
 }
 
 // WaitForCacheSync waits for all the caches to sync.  Returns false if it could not sync a cache.
-func (c multiNamespacefilteredCache) WaitForCacheSync(stop <-chan struct{}) bool {
+func (c multiNamespacefilteredCache) WaitForCacheSync(ctx context.Context) bool {
 	synced := true
 	for _, cache := range c.namespaceToCache {
-		if s := cache.WaitForCacheSync(stop); !s {
+		if s := cache.WaitForCacheSync(ctx); !s {
 			synced = s
 		}
 	}
@@ -210,7 +210,7 @@ func (c multiNamespacefilteredCache) WaitForCacheSync(stop <-chan struct{}) bool
 
 // IndexField adds an indexer to the underlying cache, using extraction function to get
 // value(s) from the given field. The filtered cache doesn't support the index yet.
-func (c multiNamespacefilteredCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue client.IndexerFunc) error {
+func (c multiNamespacefilteredCache) IndexField(ctx context.Context, obj client.Object, field string, extractValue client.IndexerFunc) error {
 	for _, cache := range c.namespaceToCache {
 		if err := cache.IndexField(ctx, obj, field, extractValue); err != nil {
 			return err

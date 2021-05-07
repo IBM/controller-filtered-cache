@@ -131,7 +131,7 @@ type filteredCache struct {
 // Get implements Reader
 // If the resource is in the cache, Get function get fetch in from the informer
 // Otherwise, resource will be get by the k8s client
-func (c filteredCache) Get(ctx context.Context, key client.ObjectKey, obj runtime.Object) error {
+func (c filteredCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object) error {
 
 	// Get the GVK of the runtime object
 	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
@@ -166,7 +166,7 @@ func (c filteredCache) getFromStore(informer toolscache.SharedIndexInformer, key
 
 	item, exists, err := informer.GetStore().GetByKey(keyString)
 	if err != nil {
-		klog.Info("Failed to get item from cache", "error", err)
+		klog.Error("Failed to get item from cache", "error", err)
 		return err
 	}
 	if !exists {
@@ -214,7 +214,7 @@ func (c filteredCache) getFromClient(ctx context.Context, key client.ObjectKey, 
 	if apierrors.IsNotFound(err) {
 		return err
 	} else if err != nil {
-		klog.Info("Failed to retrieve resource list", "error", err)
+		klog.Error("Failed to retrieve resource list", "error", err)
 		return err
 	}
 
@@ -231,7 +231,7 @@ func (c filteredCache) getFromClient(ctx context.Context, key client.ObjectKey, 
 }
 
 // List lists items out of the indexer and writes them to list
-func (c filteredCache) List(ctx context.Context, list runtime.Object, opts ...client.ListOption) error {
+func (c filteredCache) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	gvk, err := apiutil.GVKForObject(list, c.Scheme)
 	if err != nil {
 		return err
@@ -365,7 +365,7 @@ func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, 
 		Get()
 
 	if err != nil {
-		klog.Info("Failed to retrieve resource list: ", err)
+		klog.Error("Failed to retrieve resource list: ", err)
 		return err
 	}
 
@@ -383,7 +383,7 @@ func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, 
 
 // GetInformer fetches or constructs an informer for the given object that corresponds to a single
 // API kind and resource.
-func (c filteredCache) GetInformer(ctx context.Context, obj runtime.Object) (cache.Informer, error) {
+func (c filteredCache) GetInformer(ctx context.Context, obj client.Object) (cache.Informer, error) {
 	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
 	if err != nil {
 		return nil, err
@@ -408,22 +408,22 @@ func (c filteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupV
 
 // Start runs all the informers known to this cache until the given channel is closed.
 // It blocks.
-func (c filteredCache) Start(stopCh <-chan struct{}) error {
+func (c filteredCache) Start(ctx context.Context) error {
 	klog.Info("Start filtered cache")
 	for _, informer := range c.informerMap {
 		informer := informer
-		go informer.Run(stopCh)
+		go informer.Run(ctx.Done())
 	}
-	return c.fallback.Start(stopCh)
+	return c.fallback.Start(ctx)
 }
 
 // WaitForCacheSync waits for all the caches to sync.  Returns false if it could not sync a cache.
-func (c filteredCache) WaitForCacheSync(stop <-chan struct{}) bool {
+func (c filteredCache) WaitForCacheSync(ctx context.Context) bool {
 	// Wait for informer to sync
 	waiting := true
 	for waiting {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			waiting = false
 		case <-time.After(time.Second):
 			for _, informer := range c.informerMap {
@@ -432,12 +432,12 @@ func (c filteredCache) WaitForCacheSync(stop <-chan struct{}) bool {
 		}
 	}
 	// Wait for fallback cache to sync
-	return c.fallback.WaitForCacheSync(stop)
+	return c.fallback.WaitForCacheSync(ctx)
 }
 
 // IndexField adds an indexer to the underlying cache, using extraction function to get
 // value(s) from the given field. The filtered cache doesn't support the index yet.
-func (c filteredCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue client.IndexerFunc) error {
+func (c filteredCache) IndexField(ctx context.Context, obj client.Object, field string, extractValue client.IndexerFunc) error {
 	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
 	if err != nil {
 		return err
@@ -453,7 +453,7 @@ func (c filteredCache) IndexField(ctx context.Context, obj runtime.Object, field
 func indexByField(indexer cache.Informer, field string, extractor client.IndexerFunc) error {
 	indexFunc := func(objRaw interface{}) ([]string, error) {
 		// TODO(directxman12): check if this is the correct type?
-		obj, isObj := objRaw.(runtime.Object)
+		obj, isObj := objRaw.(client.Object)
 		if !isObj {
 			return nil, fmt.Errorf("object of type %T is not an Object", objRaw)
 		}
