@@ -95,7 +95,7 @@ gvkLabelsMap := map[schema.GroupVersionKind][]filteredcache.Selector{
 }
 ```
 
-Users can input the stringified selector list for resource of the same type to specify which resources should be cached. `FieldSelector` and `LabelSelector` in the same `filteredcache.Selector` are logic **AND**, the `filteredcache.Selector` from selector list for resource of the smae type will be logic **OR**.
+Users can input the stringified selector list for resource of the same type to specify which resources should be cached. `FieldSelector` and `LabelSelector` in the same `filteredcache.Selector` are logic **AND**, the `filteredcache.Selector` from selector list for resource of the same type will be logic **OR**.
 
 The above example means the operator cache will store the `Secret` that exists label `managedBy` and its name equals to `mongodb-admin`, and also store the `Secret` with resource name equals to `foo` and label `managedBy=bar`.
 
