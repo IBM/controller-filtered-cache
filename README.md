@@ -17,4 +17,3 @@ This controller-filtered-cache provides an implement for the operator to add a l
 
 ## Limitation
 
-1. The kubernetes selector doesn't support **OR** logic: For each kubernetes object, it only supports using one string as a selector for `LabelSelector` and `FieldSelector` respectively. It can't cache a resource from two different selectors. For example, users can't cache secrets with labels `app1` or `app2`.
