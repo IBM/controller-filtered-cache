@@ -105,7 +105,7 @@ func buildInformersMap(config *rest.Config, opts cache.Options, gvkLabelsMap map
 			informersMap[gvk] = append(informersMap[gvk], informer)
 			// Build list type for the GVK
 			gvkList := schema.GroupVersionKind{Group: gvk.Group, Version: gvk.Version, Kind: gvk.Kind + "List"}
-			informersMap[gvkList] = append(informersMap[gvk], informer)
+			informersMap[gvkList] = append(informersMap[gvkList], informer)
 		}
 	}
 	return informersMap, nil
