@@ -202,9 +202,14 @@ func (efc enhancedFilteredCache) getFromClient(ctx context.Context, key client.O
 	if err != nil {
 		return err
 	}
-	result, err := client.
-		Get().
-		Namespace(key.Namespace).
+
+	// Different key for cluster scope resource and namespaced resource
+	restReq := client.Get()
+	if key.Namespace != "" {
+		restReq = restReq.Namespace(key.Namespace)
+	}
+
+	result, err := restReq.
 		Name(key.Name).
 		Resource(resource).
 		VersionedParams(&metav1.GetOptions{}, metav1.ParameterCodec).
