@@ -1,5 +1,5 @@
 //
-// Copyright 2020 IBM Corporation
+// Copyright 2022 IBM Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -269,10 +269,9 @@ func (efc enhancedFilteredCache) List(ctx context.Context, list client.ObjectLis
 				objects, err := informer.GetIndexer().ByIndex(FieldIndexName(field), KeyToNamespacedKey(listOpts.Namespace, val))
 				if err != nil {
 					return err
-				} else {
-					if len(objects) != 0 {
-						objList = append(objList, objects...)
-					}
+				}
+				if len(objects) != 0 {
+					objList = append(objList, objects...)
 				}
 			}
 		} else if listOpts.Namespace != "" {
@@ -280,10 +279,9 @@ func (efc enhancedFilteredCache) List(ctx context.Context, list client.ObjectLis
 				objects, err := informer.GetIndexer().ByIndex(toolscache.NamespaceIndex, listOpts.Namespace)
 				if err != nil {
 					return err
-				} else {
-					if len(objects) != 0 {
-						objList = append(objList, objects...)
-					}
+				}
+				if len(objects) != 0 {
+					objList = append(objList, objects...)
 				}
 			}
 		} else {
@@ -515,9 +513,8 @@ func (efc enhancedFilteredCache) IndexField(ctx context.Context, obj client.Obje
 		for _, informer := range informers {
 			if err := indexByField(informer, field, extractValue); err != nil {
 				return err
-			} else {
-				continue
 			}
+			continue
 		}
 	}
 
