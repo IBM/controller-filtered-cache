@@ -47,8 +47,8 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]Selector) c
 
 		// Get the frequency that informers are resynced
 		var resync time.Duration
-		if opts.Resync != nil {
-			resync = *opts.Resync
+		if opts.SyncPeriod != nil {
+			resync = *opts.SyncPeriod
 		}
 
 		// Generate informermap to contain the gvks and their informers
@@ -65,7 +65,7 @@ func NewFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind]Selector) c
 		}
 
 		// Return the customized cache
-		return filteredCache{config: config, informerMap: informerMap, fallback: fallback, namespace: opts.Namespace, Scheme: opts.Scheme}, nil
+		return filteredCache{config: config, informerMap: informerMap, fallback: fallback, Scheme: opts.Scheme}, nil
 	}
 }
 
@@ -96,7 +96,7 @@ func buildInformerMap(config *rest.Config, opts cache.Options, gvkLabelMap map[s
 		if err != nil {
 			return nil, err
 		}
-		listerWatcher := toolscache.NewFilteredListWatchFromClient(client, plural, opts.Namespace, selectorFunc)
+		listerWatcher := toolscache.NewFilteredListWatchFromClient(client, plural, cache.AllNamespaces, selectorFunc)
 
 		// Build typed runtime object for informer
 		objType := &unstructured.Unstructured{}
@@ -388,7 +388,7 @@ func (c filteredCache) ListFromClient(ctx context.Context, list runtime.Object, 
 
 // GetInformer fetches or constructs an informer for the given object that corresponds to a single
 // API kind and resource.
-func (c filteredCache) GetInformer(ctx context.Context, obj client.Object) (cache.Informer, error) {
+func (c filteredCache) GetInformer(ctx context.Context, obj client.Object, opts ...cache.InformerGetOption) (cache.Informer, error) {
 	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
 	if err != nil {
 		return nil, err
@@ -398,17 +398,27 @@ func (c filteredCache) GetInformer(ctx context.Context, obj client.Object) (cach
 		return informer, nil
 	}
 	// Passthrough
-	return c.fallback.GetInformer(ctx, obj)
+	return c.fallback.GetInformer(ctx, obj, opts...)
 }
 
 // GetInformerForKind is similar to GetInformer, except that it takes a group-version-kind, instead
 // of the underlying object.
-func (c filteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
+func (c filteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind, opts ...cache.InformerGetOption) (cache.Informer, error) {
 	if informer, ok := c.informerMap[gvk]; ok {
 		return informer, nil
 	}
 	// Passthrough
-	return c.fallback.GetInformerForKind(ctx, gvk)
+	return c.fallback.GetInformerForKind(ctx, gvk, opts...)
+}
+
+// RemoveInformer removes the informer for the given object from the cache.
+func (c filteredCache) RemoveInformer(ctx context.Context, obj client.Object) error {
+	gvk, err := apiutil.GVKForObject(obj, c.Scheme)
+	if err != nil {
+		return err
+	}
+	delete(c.informerMap, gvk)
+	return nil
 }
 
 // Start runs all the informers known to this cache until the given channel is closed.

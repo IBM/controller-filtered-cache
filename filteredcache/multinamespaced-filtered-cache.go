@@ -39,7 +39,7 @@ func MultiNamespacedFilteredCacheBuilder(gvkLabelMap map[schema.GroupVersionKind
 		filteredCaches := map[string]cache.Cache{}
 
 		for _, ns := range namespaces {
-			opts.Namespace = ns
+			opts.DefaultNamespaces = map[string]cache.Config{ns: {}}
 			newFilteredCache := NewFilteredCacheBuilder(gvkLabelMap)
 			fc, err := newFilteredCache(config, opts)
 			if err != nil {
@@ -119,6 +119,15 @@ type multiNamespaceInformer struct {
 	namespaceToInformer map[string]cache.Informer
 }
 
+func (i *multiNamespaceInformer) IsStopped() bool {
+	for _, informer := range i.namespaceToInformer {
+		if !informer.IsStopped() {
+			return false
+		}
+	}
+	return true
+}
+
 // AddEventHandler adds the handler to each namespaced informer
 func (i *multiNamespaceInformer) AddEventHandler(handler toolscache.ResourceEventHandler) (toolscache.ResourceEventHandlerRegistration, error) {
 	handles := handlerRegistration{handles: make(map[string]toolscache.ResourceEventHandlerRegistration, len(i.namespaceToInformer))}
@@ -186,10 +195,10 @@ func (i *multiNamespaceInformer) AddIndexers(indexers toolscache.Indexers) error
 
 // GetInformer fetches or constructs an informer for the given object that corresponds to a single
 // API kind and resource.
-func (c multiNamespacefilteredCache) GetInformer(ctx context.Context, obj client.Object) (cache.Informer, error) {
+func (c multiNamespacefilteredCache) GetInformer(ctx context.Context, obj client.Object, opts ...cache.InformerGetOption) (cache.Informer, error) {
 	informers := map[string]cache.Informer{}
 	for ns, cache := range c.namespaceToCache {
-		informer, err := cache.GetInformer(ctx, obj)
+		informer, err := cache.GetInformer(ctx, obj, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -198,12 +207,25 @@ func (c multiNamespacefilteredCache) GetInformer(ctx context.Context, obj client
 	return &multiNamespaceInformer{namespaceToInformer: informers}, nil
 }
 
+func (c multiNamespacefilteredCache) RemoveInformer(ctx context.Context, obj client.Object) error {
+	for ns, cache := range c.namespaceToCache {
+		if ns != obj.GetNamespace() {
+			continue
+		}
+		err := cache.RemoveInformer(ctx, obj)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // GetInformerForKind is similar to GetInformer, except that it takes a group-version-kind, instead
 // of the underlying object.
-func (c multiNamespacefilteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
+func (c multiNamespacefilteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind, opts ...cache.InformerGetOption) (cache.Informer, error) {
 	informers := map[string]cache.Informer{}
 	for ns, cache := range c.namespaceToCache {
-		informer, err := cache.GetInformerForKind(ctx, gvk)
+		informer, err := cache.GetInformerForKind(ctx, gvk, opts...)
 		if err != nil {
 			return nil, err
 		}

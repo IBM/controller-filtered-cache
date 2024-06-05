@@ -43,8 +43,8 @@ func NewEnhancedFilteredCacheBuilder(gvkLabelsMap map[schema.GroupVersionKind][]
 
 		// Get the frequency that informers are resynced
 		var resync time.Duration
-		if opts.Resync != nil {
-			resync = *opts.Resync
+		if opts.SyncPeriod != nil {
+			resync = *opts.SyncPeriod
 		}
 
 		// Generate informersmap to contain the gvks and their informers
@@ -61,7 +61,7 @@ func NewEnhancedFilteredCacheBuilder(gvkLabelsMap map[schema.GroupVersionKind][]
 		}
 
 		// Return the customized cache
-		return enhancedFilteredCache{config: config, informersMap: informersMap, fallback: fallback, namespace: opts.Namespace, Scheme: opts.Scheme}, nil
+		return enhancedFilteredCache{config: config, informersMap: informersMap, fallback: fallback, Scheme: opts.Scheme}, nil
 	}
 }
 
@@ -87,7 +87,7 @@ func buildInformersMap(config *rest.Config, opts cache.Options, gvkLabelsMap map
 			if err != nil {
 				return nil, err
 			}
-			listerWatcher := toolscache.NewFilteredListWatchFromClient(client, plural, opts.Namespace, selectorFunc)
+			listerWatcher := toolscache.NewFilteredListWatchFromClient(client, plural, cache.AllNamespaces, selectorFunc)
 
 			// Build typed runtime object for informer
 			objType := &unstructured.Unstructured{}
@@ -116,7 +116,6 @@ type enhancedFilteredCache struct {
 	config       *rest.Config
 	informersMap map[schema.GroupVersionKind][]toolscache.SharedIndexInformer
 	fallback     cache.Cache
-	namespace    string
 	Scheme       *runtime.Scheme
 }
 
@@ -310,18 +309,7 @@ func (efc enhancedFilteredCache) List(ctx context.Context, list client.ObjectLis
 				return err
 			}
 
-			var namespace string
-
-			if efc.namespace != "" {
-				if listOpts.Namespace != "" && efc.namespace != listOpts.Namespace {
-					return fmt.Errorf("unable to list from namespace : %v because of unknown namespace for the cache", listOpts.Namespace)
-				}
-				namespace = efc.namespace
-			} else if listOpts.Namespace != "" {
-				namespace = listOpts.Namespace
-			}
-
-			if namespace != "" && namespace != meta.GetNamespace() {
+			if listOpts.Namespace != "" && listOpts.Namespace != meta.GetNamespace() {
 				continue
 			}
 
@@ -358,17 +346,6 @@ func (efc enhancedFilteredCache) ListFromClient(ctx context.Context, list runtim
 		labelSelector = listOpts.LabelSelector.String()
 	}
 
-	var namespace string
-
-	if efc.namespace != "" {
-		if listOpts.Namespace != "" && efc.namespace != listOpts.Namespace {
-			return fmt.Errorf("unable to list from namespace : %v because of unknown namespace for the cache", listOpts.Namespace)
-		}
-		namespace = efc.namespace
-	} else if listOpts.Namespace != "" {
-		namespace = listOpts.Namespace
-	}
-
 	resource := kindToResource(gvk.Kind[:len(gvk.Kind)-4])
 
 	client, err := getClientForGVK(gvk, efc.config, efc.Scheme)
@@ -377,7 +354,7 @@ func (efc enhancedFilteredCache) ListFromClient(ctx context.Context, list runtim
 	}
 	result, err := client.
 		Get().
-		Namespace(namespace).
+		Namespace(listOpts.Namespace).
 		Resource(resource).
 		VersionedParams(&metav1.ListOptions{
 			LabelSelector: labelSelector,
@@ -472,8 +449,17 @@ func (efci *enhancedFilteredCacheInformer) RemoveEventHandler(h toolscache.Resou
 // HasSynced checks if each internal informer has synced
 func (efci *enhancedFilteredCacheInformer) HasSynced() bool {
 	for _, informer := range efci.informers {
-		if ok := informer.HasSynced(); !ok {
-			return ok
+		if !informer.HasSynced() {
+			return false
+		}
+	}
+	return true
+}
+
+func (efci *enhancedFilteredCacheInformer) IsStopped() bool {
+	for _, informer := range efci.informers {
+		if !informer.IsStopped() {
+			return false
 		}
 	}
 	return true
@@ -492,7 +478,7 @@ func (efci *enhancedFilteredCacheInformer) AddIndexers(indexers toolscache.Index
 
 // GetInformer fetches or constructs an informer for the given object that corresponds to a single
 // API kind and resource.
-func (efc enhancedFilteredCache) GetInformer(ctx context.Context, obj client.Object) (cache.Informer, error) {
+func (efc enhancedFilteredCache) GetInformer(ctx context.Context, obj client.Object, _ ...cache.InformerGetOption) (cache.Informer, error) {
 	gvk, err := apiutil.GVKForObject(obj, efc.Scheme)
 	if err != nil {
 		return nil, err
@@ -507,12 +493,28 @@ func (efc enhancedFilteredCache) GetInformer(ctx context.Context, obj client.Obj
 
 // GetInformerForKind is similar to GetInformer, except that it takes a group-version-kind, instead
 // of the underlying object.
-func (efc enhancedFilteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
+func (efc enhancedFilteredCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind, _ ...cache.InformerGetOption) (cache.Informer, error) {
 	if informers, ok := efc.informersMap[gvk]; ok {
 		return &enhancedFilteredCacheInformer{informers: informers}, nil
 	}
 	// Passthrough
 	return efc.fallback.GetInformerForKind(ctx, gvk)
+}
+
+// RemoveInformer removes an informer for the given object that corresponds to a single
+// API kind and resource.
+func (efc enhancedFilteredCache) RemoveInformer(ctx context.Context, obj client.Object) error {
+	gvk, err := apiutil.GVKForObject(obj, efc.Scheme)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := efc.informersMap[gvk]; ok {
+		delete(efc.informersMap, gvk)
+		return nil
+	}
+	// Passthrough
+	return efc.fallback.RemoveInformer(ctx, obj)
 }
 
 // Start runs all the informers known to this cache until the given channel is closed.
